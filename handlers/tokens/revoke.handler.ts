@@ -23,7 +23,7 @@ export const handler: APIGatewayProxyHandler = async (event) => {
 
     await management.users.deleteRefreshTokens({ user_id: userId });
 
-    return buildResponse(200, successResult(OPERATION, userId, 1));
+    return buildResponse(202, successResult(OPERATION, userId));
   } catch (error) {
     const reason = extractErrorMessage(error);
     const retryable = isRetryable(error);

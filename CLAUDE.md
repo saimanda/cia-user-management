@@ -47,7 +47,8 @@ interface OperationResult {
 ## API Routes (all under /identity/users/{userId})
 POST /sessions/revoke          → handlers/sessions/revoke.handler.ts
 POST /tokens/revoke            → handlers/tokens/revoke.handler.ts
-POST /password/reset           → handlers/password/reset.handler.ts
+POST /account/block            → handlers/user/block.handler.ts
+POST /account/scramble-password → handlers/user/scramble-password.handler.ts
 POST /notifications/password-email → handlers/notifications/password-email.handler.ts
 POST /logout/full              → handlers/logout/full.handler.ts
 

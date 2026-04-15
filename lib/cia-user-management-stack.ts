@@ -36,6 +36,7 @@ export class CIAUserManagementStack extends cdk.Stack {
       STAGE: stage,
       AUDIT_TABLE_NAME: auditTable.table.tableName,
       NODE_OPTIONS: '--enable-source-maps',
+      AUTH0_CONNECTION: (this.node.tryGetContext('auth0Connection') as string | undefined) ?? 'NewsCorp-Australia',
     };
 
     const commonBundling: BundlingOptions = {
@@ -69,10 +70,16 @@ export class CIAUserManagementStack extends cdk.Stack {
       functionName: `CIAUserManagement-TokensRevoke-${stage}`,
     });
 
-    const passwordResetFn = new NodejsFunction(this, 'PasswordResetHandler', {
+    const userBlockFn = new NodejsFunction(this, 'UserBlockHandler', {
       ...commonFnProps,
-      entry: path.join(handlerDir, 'password/reset.handler.ts'),
-      functionName: `CIAUserManagement-PasswordReset-${stage}`,
+      entry: path.join(handlerDir, 'user/block.handler.ts'),
+      functionName: `CIAUserManagement-UserBlock-${stage}`,
+    });
+
+    const scramblePasswordFn = new NodejsFunction(this, 'ScramblePasswordHandler', {
+      ...commonFnProps,
+      entry: path.join(handlerDir, 'user/scramble-password.handler.ts'),
+      functionName: `CIAUserManagement-ScramblePassword-${stage}`,
     });
 
     const passwordEmailFn = new NodejsFunction(this, 'PasswordEmailHandler', {
@@ -82,7 +89,7 @@ export class CIAUserManagementStack extends cdk.Stack {
     });
 
     // Grant each atomic handler access to the Auth0 secret and audit table.
-    for (const fn of [sessionsRevokeFn, tokensRevokeFn, passwordResetFn, passwordEmailFn]) {
+    for (const fn of [sessionsRevokeFn, tokensRevokeFn, userBlockFn, scramblePasswordFn, passwordEmailFn]) {
       fn.addToRolePolicy(secretsPolicy);
       auditTable.table.grantWriteData(fn);
     }
@@ -93,7 +100,8 @@ export class CIAUserManagementStack extends cdk.Stack {
       handlers: {
         sessionsRevoke: sessionsRevokeFn,
         tokensRevoke: tokensRevokeFn,
-        passwordReset: passwordResetFn,
+        userBlock: userBlockFn,
+        scramblePassword: scramblePasswordFn,
         passwordEmail: passwordEmailFn,
       },
     });

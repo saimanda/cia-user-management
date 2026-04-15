@@ -6,7 +6,8 @@ import * as lambda from 'aws-cdk-lib/aws-lambda';
 export interface ApiGatewayHandlers {
   sessionsRevoke: lambda.IFunction;
   tokensRevoke: lambda.IFunction;
-  passwordReset: lambda.IFunction;
+  userBlock: lambda.IFunction;
+  scramblePassword: lambda.IFunction;
   passwordEmail: lambda.IFunction;
 }
 
@@ -61,11 +62,16 @@ export class ApiGatewayConstruct extends Construct {
       .addResource('revoke')
       .addMethod('POST', new apigw.LambdaIntegration(props.handlers.tokensRevoke));
 
-    // POST /password/reset
-    user
-      .addResource('password')
-      .addResource('reset')
-      .addMethod('POST', new apigw.LambdaIntegration(props.handlers.passwordReset));
+    // POST /account/block and POST /account/scramble-password share the /account resource
+    const account = user.addResource('account');
+
+    account
+      .addResource('block')
+      .addMethod('POST', new apigw.LambdaIntegration(props.handlers.userBlock));
+
+    account
+      .addResource('scramble-password')
+      .addMethod('POST', new apigw.LambdaIntegration(props.handlers.scramblePassword));
 
     // POST /notifications/password-email
     user

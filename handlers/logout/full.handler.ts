@@ -10,15 +10,20 @@ interface StepResult {
 }
 
 /**
- * Orchestrates a full user logout by calling the four atomic endpoints
- * over HTTP. Each step is attempted independently so a single failure
- * does not abort the remaining steps.
+ * Orchestrates a full user logout using a conditional step pipeline.
  *
- * Steps (in order):
- *  1. sessions/revoke
- *  2. tokens/revoke
- *  3. password/reset
- *  4. notifications/password-email
+ * Phase 1 — Sequential (always runs in order):
+ *   1. sessions/revoke
+ *   2. tokens/revoke
+ *   3. account/scramble-password
+ *
+ * Phase 2 — Fallback (only if scramble-password failed):
+ *   4. account/block
+ *
+ * Phase 3 — Notification (only if scramble-password OR block succeeded):
+ *   5. notifications/password-email
+ *
+ * All invoked step statuses are summarised in a console.log at the end.
  *
  * Route: POST /identity/users/{userId}/logout/full
  *
@@ -41,42 +46,45 @@ export const handler: APIGatewayProxyHandler = async (event) => {
   const base = apiBaseUrl.replace(/\/$/, '');
   const userBase = `${base}/identity/users/${encodeURIComponent(userId)}`;
 
-  const steps: Array<{ name: string; url: string }> = [
-    { name: 'sessions_revoke', url: `${userBase}/sessions/revoke` },
-    { name: 'tokens_revoke', url: `${userBase}/tokens/revoke` },
-    { name: 'password_reset', url: `${userBase}/password/reset` },
-    { name: 'notifications_password_email', url: `${userBase}/notifications/password-email` },
+  // ── Phase 1: Sequential ────────────────────────────────────────────────────
+  const sessionsResult = await callStep('sessions_revoke', `${userBase}/sessions/revoke`, userId);
+  const tokensResult = await callStep('tokens_revoke', `${userBase}/tokens/revoke`, userId);
+  const scrambleResult = await callStep('user_scramble_password', `${userBase}/account/scramble-password`, userId);
+
+  // ── Phase 2: Block is fallback if scramble-password failed ─────────────────
+  let blockResult: StepResult | undefined;
+  if (!scrambleResult.ok) {
+    blockResult = await callStep('user_block', `${userBase}/account/block`, userId);
+  }
+
+  // ── Phase 3: Email only if scramble-password OR block succeeded ────────────
+  const accountActionOk = scrambleResult.ok || (blockResult?.ok ?? false);
+  let emailResult: StepResult | undefined;
+  if (accountActionOk) {
+    emailResult = await callStep('notifications_password_email', `${userBase}/notifications/password-email`, userId);
+  }
+
+  // ── Collect all invoked steps ──────────────────────────────────────────────
+  const allResults: StepResult[] = [
+    sessionsResult,
+    tokensResult,
+    scrambleResult,
+    ...(blockResult ? [blockResult] : []),
+    ...(emailResult ? [emailResult] : []),
   ];
 
-  const results: StepResult[] = await Promise.all(
-    steps.map(async (step) => {
-      try {
-        const response = await fetch(step.url, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-        });
+  const succeeded = allResults.filter((r) => r.ok);
+  const failed = allResults.filter((r) => !r.ok);
 
-        const body = (await response.json()) as OperationResult;
-        return { name: step.name, result: body, ok: response.ok };
-      } catch (error) {
-        const reason = error instanceof Error ? error.message : String(error);
-        return {
-          name: step.name,
-          result: failedResult(step.name, userId, reason, true),
-          ok: false,
-        };
-      }
-    }),
-  );
+  // ── Summary log ───────────────────────────────────────────────────────────
+  const summary = allResults
+    .map((r) => `  ${r.ok ? '✓' : '✗'} ${r.name}: ${r.result.status}${r.result.reason ? ` — ${r.result.reason}` : ''}`)
+    .join('\n');
+  console.log(`[logout/full] userId=${userId} | ${succeeded.length}/${allResults.length} steps succeeded\n${summary}`);
 
-  const failed = results.filter((r) => !r.ok);
-  const succeeded = results.filter((r) => r.ok);
-
+  // ── Response ───────────────────────────────────────────────────────────────
   if (failed.length === 0) {
-    return buildResponse(200, {
-      ...successResult(OPERATION, userId, steps.length),
-      reason: undefined,
-    });
+    return buildResponse(200, successResult(OPERATION, userId, allResults.length));
   }
 
   if (succeeded.length === 0) {
@@ -87,3 +95,17 @@ export const handler: APIGatewayProxyHandler = async (event) => {
   const reasons = failed.map((r) => `${r.name}: ${r.result.reason ?? 'unknown'}`).join('; ');
   return buildResponse(207, partialResult(OPERATION, userId, reasons, succeeded.length));
 };
+
+async function callStep(name: string, url: string, userId: string): Promise<StepResult> {
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    });
+    const body = (await response.json()) as OperationResult;
+    return { name, result: body, ok: response.ok };
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    return { name, result: failedResult(name, userId, reason, true), ok: false };
+  }
+}

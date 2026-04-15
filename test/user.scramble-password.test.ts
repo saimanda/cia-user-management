@@ -1,15 +1,15 @@
 import { APIGatewayProxyEvent } from 'aws-lambda';
-import { handler } from '../handlers/sessions/revoke.handler';
+import { handler } from '../handlers/user/scramble-password.handler';
 import * as auth0Client from '../shared/auth0-client';
 import { resetAuth0ClientCache } from '../shared/auth0-client';
 
 jest.mock('../shared/auth0-client');
 
-const mockDeleteSessions = jest.fn();
+const mockUsersUpdate = jest.fn();
 
 const mockManagement = {
   users: {
-    deleteSessions: mockDeleteSessions,
+    update: mockUsersUpdate,
   },
 };
 
@@ -21,7 +21,7 @@ const makeEvent = (userId?: string): APIGatewayProxyEvent =>
     multiValueHeaders: {},
     httpMethod: 'POST',
     isBase64Encoded: false,
-    path: `/identity/users/${userId ?? ''}/sessions/revoke`,
+    path: `/identity/users/${userId ?? ''}/account/scramble-password`,
     queryStringParameters: null,
     multiValueQueryStringParameters: null,
     stageVariables: null,
@@ -29,13 +29,17 @@ const makeEvent = (userId?: string): APIGatewayProxyEvent =>
     resource: '',
   }) as APIGatewayProxyEvent;
 
-describe('sessions/revoke handler', () => {
+describe('user/scramble-password handler', () => {
+  const originalEnv = process.env;
+
   beforeEach(() => {
     resetAuth0ClientCache();
     jest.spyOn(auth0Client, 'getAuth0Client').mockResolvedValue(mockManagement as never);
+    process.env = { ...originalEnv };
   });
 
   afterEach(() => {
+    process.env = originalEnv;
     jest.resetAllMocks();
   });
 
@@ -43,41 +47,73 @@ describe('sessions/revoke handler', () => {
     const response = await handler(makeEvent(), {} as never, () => undefined);
     expect(response).toBeDefined();
     if (!response) throw new Error('No response');
-    expect(response.statusCode).toBe(400);
 
+    expect(response.statusCode).toBe(400);
     const body = JSON.parse(response.body) as { operation: string; status: string };
-    expect(body.operation).toBe('sessions_revoke');
+    expect(body.operation).toBe('user_scramble_password');
     expect(body.status).toBe('failed');
   });
 
-  it('calls deleteSessions with user_id and returns 202 on success', async () => {
-    mockDeleteSessions.mockResolvedValueOnce({});
+  it('calls users.update with a random password and default connection, returns 200', async () => {
+    delete process.env.AUTH0_CONNECTION;
+    mockUsersUpdate.mockResolvedValueOnce({});
 
     const response = await handler(makeEvent('auth0|test-user-123'), {} as never, () => undefined);
     expect(response).toBeDefined();
     if (!response) throw new Error('No response');
 
-    // Auth0 Management API returns 202 Accepted (async deletion)
-    expect(response.statusCode).toBe(202);
+    expect(response.statusCode).toBe(200);
     const body = JSON.parse(response.body) as {
       operation: string;
       status: string;
       userId: string;
       affectedCount?: number;
     };
-    expect(body.operation).toBe('sessions_revoke');
+    expect(body.operation).toBe('user_scramble_password');
     expect(body.status).toBe('success');
     expect(body.userId).toBe('auth0|test-user-123');
-    // API returns no body — affectedCount must not be present
     expect(body.affectedCount).toBeUndefined();
-    expect(mockDeleteSessions).toHaveBeenCalledWith({ user_id: 'auth0|test-user-123' });
+
+    expect(mockUsersUpdate).toHaveBeenCalledTimes(1);
+    const [pathParam, bodyParam] = mockUsersUpdate.mock.calls[0] as [
+      { id: string },
+      { password: string; connection: string },
+    ];
+    expect(pathParam).toEqual({ id: 'auth0|test-user-123' });
+    expect(bodyParam.connection).toBe('NewsCorp-Australia');
+    // Password must be a non-empty string — random, so just validate shape
+    expect(typeof bodyParam.password).toBe('string');
+    expect(bodyParam.password.length).toBeGreaterThan(0);
   });
 
-  it('returns 500 with retryable=false on 400 invalid request error', async () => {
-    mockDeleteSessions.mockRejectedValueOnce(new Error('400 Invalid request URI'));
+  it('uses AUTH0_CONNECTION env var when set', async () => {
+    process.env.AUTH0_CONNECTION = 'NewsCorp-Dev';
+    mockUsersUpdate.mockResolvedValueOnce({});
+
+    await handler(makeEvent('auth0|test-user-123'), {} as never, () => undefined);
+
+    const [, bodyParam] = mockUsersUpdate.mock.calls[0] as [
+      { id: string },
+      { password: string; connection: string },
+    ];
+    expect(bodyParam.connection).toBe('NewsCorp-Dev');
+  });
+
+  it('generates a different password on each invocation', async () => {
+    mockUsersUpdate.mockResolvedValue({});
+
+    await handler(makeEvent('auth0|test-user-123'), {} as never, () => undefined);
+    await handler(makeEvent('auth0|test-user-123'), {} as never, () => undefined);
+
+    const pass1 = (mockUsersUpdate.mock.calls[0] as [{ id: string }, { password: string }])[1].password;
+    const pass2 = (mockUsersUpdate.mock.calls[1] as [{ id: string }, { password: string }])[1].password;
+    expect(pass1).not.toBe(pass2);
+  });
+
+  it('returns 500 with retryable=false on 400 invalid request body error', async () => {
+    mockUsersUpdate.mockRejectedValueOnce(new Error('400 Invalid request body'));
 
     const response = await handler(makeEvent('auth0|test-user-123'), {} as never, () => undefined);
-    expect(response).toBeDefined();
     if (!response) throw new Error('No response');
 
     expect(response.statusCode).toBe(500);
@@ -87,10 +123,9 @@ describe('sessions/revoke handler', () => {
   });
 
   it('returns 500 with retryable=false on 401 invalid token error', async () => {
-    mockDeleteSessions.mockRejectedValueOnce(new Error('401 Invalid token'));
+    mockUsersUpdate.mockRejectedValueOnce(new Error('401 Invalid token'));
 
     const response = await handler(makeEvent('auth0|test-user-123'), {} as never, () => undefined);
-    expect(response).toBeDefined();
     if (!response) throw new Error('No response');
 
     expect(response.statusCode).toBe(500);
@@ -100,12 +135,11 @@ describe('sessions/revoke handler', () => {
   });
 
   it('returns 500 with retryable=false on 403 insufficient scope error', async () => {
-    mockDeleteSessions.mockRejectedValueOnce(
-      new Error('403 Insufficient scope; expected: delete:sessions'),
+    mockUsersUpdate.mockRejectedValueOnce(
+      new Error('403 Insufficient scope; expected any of: update:users,update:users_app_metadata'),
     );
 
     const response = await handler(makeEvent('auth0|test-user-123'), {} as never, () => undefined);
-    expect(response).toBeDefined();
     if (!response) throw new Error('No response');
 
     expect(response.statusCode).toBe(500);
@@ -115,10 +149,9 @@ describe('sessions/revoke handler', () => {
   });
 
   it('returns 500 with retryable=false on 404 user not found error', async () => {
-    mockDeleteSessions.mockRejectedValueOnce(new Error('User not found'));
+    mockUsersUpdate.mockRejectedValueOnce(new Error('User not found'));
 
     const response = await handler(makeEvent('auth0|test-user-123'), {} as never, () => undefined);
-    expect(response).toBeDefined();
     if (!response) throw new Error('No response');
 
     expect(response.statusCode).toBe(500);
@@ -127,11 +160,10 @@ describe('sessions/revoke handler', () => {
     expect(body.retryable).toBe(false);
   });
 
-  it('returns 503 with retryable=true on rate-limit error (429)', async () => {
-    mockDeleteSessions.mockRejectedValueOnce(new Error('429 Too Many Requests'));
+  it('returns 503 with retryable=true on 429 rate-limit error', async () => {
+    mockUsersUpdate.mockRejectedValueOnce(new Error('429 Too Many Requests'));
 
     const response = await handler(makeEvent('auth0|test-user-123'), {} as never, () => undefined);
-    expect(response).toBeDefined();
     if (!response) throw new Error('No response');
 
     expect(response.statusCode).toBe(503);
@@ -141,10 +173,9 @@ describe('sessions/revoke handler', () => {
   });
 
   it('returns 503 with retryable=true on 5xx server error', async () => {
-    mockDeleteSessions.mockRejectedValueOnce(new Error('503 Service Unavailable'));
+    mockUsersUpdate.mockRejectedValueOnce(new Error('503 Service Unavailable'));
 
     const response = await handler(makeEvent('auth0|test-user-123'), {} as never, () => undefined);
-    expect(response).toBeDefined();
     if (!response) throw new Error('No response');
 
     expect(response.statusCode).toBe(503);
@@ -154,7 +185,7 @@ describe('sessions/revoke handler', () => {
   });
 
   it('response body always includes a timestamp', async () => {
-    mockDeleteSessions.mockResolvedValueOnce({});
+    mockUsersUpdate.mockResolvedValueOnce({});
 
     const response = await handler(makeEvent('auth0|test-user-123'), {} as never, () => undefined);
     if (!response) throw new Error('No response');

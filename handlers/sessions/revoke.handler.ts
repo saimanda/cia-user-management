@@ -22,7 +22,7 @@ export const handler: APIGatewayProxyHandler = async (event) => {
     const management = await getAuth0Client();
     await management.users.deleteSessions({ user_id: userId });
 
-    return buildResponse(200, successResult(OPERATION, userId, 1));
+    return buildResponse(202, successResult(OPERATION, userId));
   } catch (error) {
     const reason = extractErrorMessage(error);
     const retryable = isRetryable(error);
