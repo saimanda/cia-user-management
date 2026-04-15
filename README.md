@@ -21,13 +21,14 @@ AWS CDK stack for NCA's **CIA (Customer Identity & Access) Platform**. This is t
 
 All routes are scoped under `/identity/users/{userId}`:
 
-| Method | Path | Lambda | Operation |
-|---|---|---|---|
-| POST | `/identity/users/{userId}/sessions/revoke` | `SessionsRevoke` | Revoke all active sessions |
-| POST | `/identity/users/{userId}/tokens/revoke` | `TokensRevoke` | Revoke all refresh tokens |
-| POST | `/identity/users/{userId}/password/reset` | `PasswordReset` | Trigger a password reset |
-| POST | `/identity/users/{userId}/notifications/password-email` | `PasswordEmail` | Send password change notification email |
-| POST | `/identity/users/{userId}/logout/full` | `FullLogout` | Orchestrate all 4 steps above atomically |
+| Method | Path | Lambda | Operation | Auth0 API |
+|---|---|---|---|---|
+| POST | `/identity/users/{userId}/sessions/revoke` | `SessionsRevoke` | Revoke all active sessions | `DELETE /v2/users/{id}/sessions` → `202` |
+| POST | `/identity/users/{userId}/tokens/revoke` | `TokensRevoke` | Revoke all refresh tokens | `DELETE /v2/users/{id}/refresh-tokens` → `202` |
+| POST | `/identity/users/{userId}/account/block` | `UserBlock` | Block user account | `PATCH /v2/users/{id}` `{blocked:true}` → `200` |
+| POST | `/identity/users/{userId}/account/scramble-password` | `ScramblePassword` | Set random password, locking user out | `PATCH /v2/users/{id}` `{password, connection}` → `200` |
+| POST | `/identity/users/{userId}/notifications/password-email` | `PasswordEmail` | Send password reset notification email | Auth0 Auth API |
+| POST | `/identity/users/{userId}/logout/full` | `FullLogout` | Orchestrate all steps via conditional pipeline | — |
 
 ---
 
@@ -47,6 +48,8 @@ interface OperationResult {
 }
 ```
 
+> **Note on `202` handlers:** `sessions/revoke` and `tokens/revoke` return `202 Accepted` — Auth0 processes these deletions asynchronously. No `affectedCount` is returned since Auth0 responds with an empty body.
+
 ---
 
 ## High-Level Architecture
@@ -61,17 +64,19 @@ flowchart TD
         subgraph APIGW["API Gateway\nCIAUserManagement-{stage}"]
             R1["POST /sessions/revoke"]
             R2["POST /tokens/revoke"]
-            R3["POST /password/reset"]
-            R4["POST /notifications/password-email"]
-            R5["POST /logout/full"]
+            R3["POST /account/block"]
+            R4["POST /account/scramble-password"]
+            R5["POST /notifications/password-email"]
+            R6["POST /logout/full"]
         end
 
         subgraph Lambdas["Lambda Functions (Node.js 18)"]
-            L1["SessionsRevoke"]
-            L2["TokensRevoke"]
-            L3["PasswordReset"]
-            L4["PasswordEmail"]
-            L5["FullLogout\n(orchestrator)"]
+            L1["SessionsRevoke\n→ 202"]
+            L2["TokensRevoke\n→ 202"]
+            L3["UserBlock\n→ 200"]
+            L4["ScramblePassword\n→ 200"]
+            L5["PasswordEmail\n→ 200"]
+            L6["FullLogout\n(orchestrator)"]
         end
 
         subgraph SharedLayer["Lambda Layer (Shared)"]
@@ -83,7 +88,7 @@ flowchart TD
     end
 
     subgraph Auth0["Auth0 Tenant\n{domain}.au.auth0.com"]
-        A0["Management API\n(M2M Client)"]
+        A0["Management API v2\n(M2M Client)"]
     end
 
     AGENT -->|HTTP POST| APIGW
@@ -93,62 +98,78 @@ flowchart TD
     R3 --> L3
     R4 --> L4
     R5 --> L5
+    R6 --> L6
 
-    L5 -->|HTTP POST x4\nfetch() in parallel| R1
-    L5 -->|HTTP POST x4\nfetch() in parallel| R2
-    L5 -->|HTTP POST x4\nfetch() in parallel| R3
-    L5 -->|HTTP POST x4\nfetch() in parallel| R4
+    L6 -->|conditional pipeline\nHTTP fetch| R1
+    L6 -->|conditional pipeline\nHTTP fetch| R2
+    L6 -->|conditional pipeline\nHTTP fetch| R3
+    L6 -->|conditional pipeline\nHTTP fetch| R4
+    L6 -->|conditional pipeline\nHTTP fetch| R5
 
-    L1 & L2 & L3 & L4 -->|Reads credentials\n(cold start only)| SM
+    L1 & L2 & L3 & L4 & L5 -->|Reads credentials\n(cold start only)| SM
     SM -->|clientId\nclientSecret\ndomain| L1
 
-    L1 & L2 & L3 & L4 -->|Calls Auth0 API| A0
-    L1 & L2 & L3 & L4 & L5 -->|Write audit record| DDB
+    L1 & L2 & L3 & L4 & L5 -->|Calls Auth0 API| A0
+    L1 & L2 & L3 & L4 & L5 & L6 -->|Write audit record| DDB
 
-    SL -.->|imported by| L1 & L2 & L3 & L4 & L5
+    SL -.->|imported by| L1 & L2 & L3 & L4 & L5 & L6
 ```
 
 ---
 
-## Full Logout Orchestration Flow
+## Full Logout Orchestration Pipeline
+
+The `logout/full` handler runs a **conditional step pipeline** — not a simple parallel fan-out.
 
 ```mermaid
-sequenceDiagram
-    participant Agent as AI Agent
-    participant GW as API Gateway
-    participant FL as FullLogout Lambda
-    participant S as SessionsRevoke
-    participant T as TokensRevoke
-    participant P as PasswordReset
-    participant N as PasswordEmail
-    participant DDB as DynamoDB Audit
+flowchart TD
+    START([POST /logout/full]) --> S1
 
-    Agent->>GW: POST /identity/users/{userId}/logout/full
-    GW->>FL: invoke
-
-    par parallel HTTP calls
-        FL->>S: POST /sessions/revoke
-        FL->>T: POST /tokens/revoke
-        FL->>P: POST /password/reset
-        FL->>N: POST /notifications/password-email
+    subgraph Phase1["Phase 1 — Sequential always"]
+        S1[sessions_revoke] --> S2[tokens_revoke] --> S3[user_scramble_password]
     end
 
-    S-->>FL: OperationResult
-    T-->>FL: OperationResult
-    P-->>FL: OperationResult
-    N-->>FL: OperationResult
+    S3 --> SCRAMBLE_OK{scramble\nsucceeded?}
 
-    FL->>DDB: write audit record
+    SCRAMBLE_OK -->|yes — skip block| EMAIL_GATE
+    SCRAMBLE_OK -->|no — fallback| S4[user_block]
 
-    alt all succeeded
-        FL-->>GW: 200 success (affectedCount: 4)
-    else some failed
-        FL-->>GW: 207 partial (retryable: true)
-    else all failed
-        FL-->>GW: 500 failed (retryable: true)
+    S4 --> BLOCK_OK{block\nsucceeded?}
+    BLOCK_OK -->|yes| EMAIL_GATE
+    BLOCK_OK -->|no| SKIP_EMAIL[skip email]
+
+    EMAIL_GATE([account action ok?]) --> S5[notifications_password_email]
+
+    S5 --> LOG
+    SKIP_EMAIL --> LOG
+
+    LOG[console.log summary\nof all invoked steps] --> RESPONSE
+
+    subgraph Response
+        RESPONSE{outcomes}
+        RESPONSE -->|all ok| R200[200 success]
+        RESPONSE -->|some ok| R207[207 partial]
+        RESPONSE -->|all failed| R500[500 failed]
     end
+```
 
-    GW-->>Agent: OperationResult
+### Step execution by scenario
+
+| Scenario | Steps invoked | fetch calls | Response |
+|---|---|---|---|
+| All succeed | sessions, tokens, scramble, email | 4 | `200` affectedCount: 4 |
+| Scramble fails, block ok, email ok | sessions, tokens, scramble, block, email | 5 | `207` affectedCount: 4 |
+| Scramble fails, block fails | sessions, tokens, scramble, block | 4 | `207` or `500` |
+| Everything fails | sessions, tokens, scramble, block | 4 | `500` |
+
+### Console log summary (emitted on every invocation)
+
+```
+[logout/full] userId=auth0|xyz | 4/4 steps succeeded
+  ✓ sessions_revoke: success
+  ✓ tokens_revoke: success
+  ✓ user_scramble_password: success
+  ✓ notifications_password_email: success
 ```
 
 ---
@@ -162,7 +183,7 @@ graph TD
     STACK --> ATC["AuditTableConstruct\nDynamoDB table\nPAY_PER_REQUEST | TTL 90d\nPITR on prod"]
     STACK --> LLC["LambdaLayerConstruct\nShared Layer\nauth0 + AWS SDK"]
     STACK --> AGC["ApiGatewayConstruct\nREST API\nThrottle: 100rps / burst 200"]
-    STACK --> FNS["5 x NodejsFunction\n256MB | 30s timeout\n(FullLogout: 120s)"]
+    STACK --> FNS["6 x NodejsFunction\n256MB | 30s timeout\n(FullLogout: 120s)"]
 
     FNS --> IAM["IAM Policy\nsecretsmanager:GetSecretValue\n/cia/auth0/m2m-credentials"]
     FNS --> DDB_GRANT["DynamoDB\ngrantWriteData"]
@@ -172,32 +193,53 @@ graph TD
 
 ---
 
+## Environment Variables
+
+| Variable | Set by | Default | Description |
+|---|---|---|---|
+| `STAGE` | CDK stack | — | Deployment stage (`dev`, `uat`, `prod`) |
+| `AUDIT_TABLE_NAME` | CDK stack | — | DynamoDB audit table name |
+| `AUTH0_CONNECTION` | CDK stack | `NewsCorp-Australia` | Auth0 database connection for `scramble-password` |
+| `API_BASE_URL` | CDK stack | — | API Gateway base URL (injected into `FullLogout` only) |
+
+Override `AUTH0_CONNECTION` per stage via CDK context:
+```bash
+cdk deploy -c stage=dev -c auth0Connection=NewsCorp-Dev
+```
+
+---
+
 ## File Structure
 
 ```
 .
 ├── bin/
-│   └── app.ts                          # CDK entry point
+│   └── app.ts                               # CDK entry point
 ├── lib/
-│   ├── cia-user-management-stack.ts    # Main CDK Stack
+│   ├── cia-user-management-stack.ts         # Main CDK Stack
 │   └── constructs/
-│       ├── api-gateway.construct.ts    # API Gateway (REST API + routes)
-│       ├── audit-table.construct.ts    # DynamoDB audit table
-│       └── lambda-layer.construct.ts  # Shared Lambda layer
+│       ├── api-gateway.construct.ts         # API Gateway (REST API + routes)
+│       ├── audit-table.construct.ts         # DynamoDB audit table
+│       └── lambda-layer.construct.ts        # Shared Lambda layer
 ├── handlers/
-│   ├── sessions/revoke.handler.ts
-│   ├── tokens/revoke.handler.ts
-│   ├── password/reset.handler.ts
+│   ├── sessions/revoke.handler.ts           # DELETE /v2/users/{id}/sessions → 202
+│   ├── tokens/revoke.handler.ts             # DELETE /v2/users/{id}/refresh-tokens → 202
+│   ├── user/
+│   │   ├── block.handler.ts                 # PATCH /v2/users/{id} {blocked:true} → 200
+│   │   └── scramble-password.handler.ts     # PATCH /v2/users/{id} {password, connection} → 200
 │   ├── notifications/password-email.handler.ts
-│   └── logout/full.handler.ts          # Orchestrator (HTTP fan-out)
+│   └── logout/full.handler.ts               # Conditional pipeline orchestrator
 ├── shared/
-│   ├── auth0-client.ts                 # Singleton ManagementClient (cached)
-│   ├── response.ts                     # OperationResult builders
-│   └── errors.ts                       # Error classes + retry detection
+│   ├── auth0-client.ts                      # Singleton ManagementClient (cached)
+│   ├── response.ts                          # OperationResult builders
+│   └── errors.ts                            # Error classes + retry detection
 ├── layer/
-│   └── nodejs/package.json             # Lambda layer dependencies
+│   └── nodejs/package.json                  # Lambda layer dependencies
 └── test/
     ├── sessions.revoke.test.ts
+    ├── tokens.revoke.test.ts
+    ├── user.block.test.ts
+    ├── user.scramble-password.test.ts
     └── logout.full.test.ts
 ```
 
@@ -209,7 +251,8 @@ graph TD
 2. Every handler returns the `OperationResult` interface — no exceptions
 3. The Auth0 `ManagementClient` is **never** instantiated in a handler — always imported from `shared/auth0-client.ts`
 4. Secrets come from AWS Secrets Manager only — never env vars, never hardcoded
-5. The `/logout/full` orchestrator calls the other 4 atomic endpoints via HTTP — it does **not** duplicate their Auth0 logic
+5. The `/logout/full` orchestrator calls atomic endpoints via HTTP — it does **not** duplicate their Auth0 logic
+6. `scramble-password` uses Node.js built-in `crypto.randomBytes` — the generated password is never stored or logged
 
 ---
 
@@ -226,6 +269,9 @@ npm run build
 cdk deploy -c stage=dev
 cdk deploy -c stage=uat
 cdk deploy -c stage=prod
+
+# Override Auth0 connection per stage
+cdk deploy -c stage=uat -c auth0Connection=NewsCorp-UAT
 ```
 
 ### AWS Secrets Manager — required before first deploy
