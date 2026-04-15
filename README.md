@@ -115,6 +115,41 @@ flowchart TD
     SL -.->|imported by| L1 & L2 & L3 & L4 & L5 & L6
 ```
 
+### Request Sequence
+
+```mermaid
+sequenceDiagram
+    participant Agent as AI Agent
+    participant GW as API Gateway
+    participant Lambda as Lambda Handler
+    participant SM as Secrets Manager
+    participant Auth0 as Auth0 Management API
+    participant DDB as DynamoDB Audit
+
+    Agent->>GW: POST /identity/users/{userId}/<operation>
+    GW->>Lambda: invoke with event
+
+    alt Cold start
+        Lambda->>SM: GetSecretValue /cia/auth0/m2m-credentials
+        SM-->>Lambda: clientId, clientSecret, domain
+        note over Lambda: ManagementClient cached for warm invocations
+    end
+
+    Lambda->>Auth0: Management API call (DELETE or PATCH)
+    Auth0-->>Lambda: 200 / 202 / 4xx / 429 / 5xx
+
+    alt Success
+        Lambda->>DDB: write audit record
+        Lambda-->>GW: 200 or 202 OperationResult status=success
+    else Non-retryable error (400 / 401 / 403 / 404)
+        Lambda-->>GW: 500 OperationResult status=failed retryable=false
+    else Retryable error (429 / 5xx)
+        Lambda-->>GW: 503 OperationResult status=failed retryable=true
+    end
+
+    GW-->>Agent: OperationResult JSON
+```
+
 ---
 
 ## Full Logout Orchestration Pipeline
