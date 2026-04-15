@@ -1,0 +1,8 @@
+{
+  "name": "cia-user-management-layer",
+  "version": "1.0.0",
+  "description": "Lambda layer dependencies for CIA User Management stack",
+  "dependencies": {
+    "auth0": "^4.3.1"
+  }
+}
