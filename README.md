@@ -60,8 +60,8 @@ flowchart TD
         AGENT[AI Agent or API Consumer]
     end
 
-    subgraph AWS["AWS — ap-southeast-2"]
-        subgraph APIGW["API Gateway\nCIAUserManagement-{stage}"]
+    subgraph AWS["AWS ap-southeast-2"]
+        subgraph APIGW["API Gateway - CIAUserManagement-stage"]
             R1["POST /sessions/revoke"]
             R2["POST /tokens/revoke"]
             R3["POST /account/block"]
@@ -70,25 +70,25 @@ flowchart TD
             R6["POST /logout/full"]
         end
 
-        subgraph Lambdas["Lambda Functions (Node.js 18)"]
-            L1["SessionsRevoke\n→ 202"]
-            L2["TokensRevoke\n→ 202"]
-            L3["UserBlock\n→ 200"]
-            L4["ScramblePassword\n→ 200"]
-            L5["PasswordEmail\n→ 200"]
-            L6["FullLogout\n(orchestrator)"]
+        subgraph Lambdas["Lambda Functions Node.js 18"]
+            L1["SessionsRevoke - 202"]
+            L2["TokensRevoke - 202"]
+            L3["UserBlock - 200"]
+            L4["ScramblePassword - 200"]
+            L5["PasswordEmail - 200"]
+            L6["FullLogout orchestrator"]
         end
 
-        subgraph SharedLayer["Lambda Layer (Shared)"]
-            SL["auth0-client.ts\nresponse.ts\nerrors.ts"]
+        subgraph SharedLayer["Lambda Layer"]
+            SL["auth0-client.ts, response.ts, errors.ts"]
         end
 
-        SM["AWS Secrets Manager\n/cia/auth0/m2m-credentials"]
-        DDB["DynamoDB\nCIAUserManagement-Audit-{stage}\nPK: userId | SK: timestamp | TTL: 90d"]
+        SM["AWS Secrets Manager /cia/auth0/m2m-credentials"]
+        DDB["DynamoDB CIAUserManagement-Audit-stage"]
     end
 
-    subgraph Auth0["Auth0 Tenant\n{domain}.au.auth0.com"]
-        A0["Management API v2\n(M2M Client)"]
+    subgraph Auth0["Auth0 Tenant"]
+        A0["Management API v2 M2M Client"]
     end
 
     AGENT -->|HTTP POST| APIGW
@@ -100,14 +100,14 @@ flowchart TD
     R5 --> L5
     R6 --> L6
 
-    L6 -->|conditional pipeline\nHTTP fetch| R1
-    L6 -->|conditional pipeline\nHTTP fetch| R2
-    L6 -->|conditional pipeline\nHTTP fetch| R3
-    L6 -->|conditional pipeline\nHTTP fetch| R4
-    L6 -->|conditional pipeline\nHTTP fetch| R5
+    L6 -->|HTTP fetch| R1
+    L6 -->|HTTP fetch| R2
+    L6 -->|HTTP fetch| R3
+    L6 -->|HTTP fetch| R4
+    L6 -->|HTTP fetch| R5
 
-    L1 & L2 & L3 & L4 & L5 -->|Reads credentials\n(cold start only)| SM
-    SM -->|clientId\nclientSecret\ndomain| L1
+    L1 & L2 & L3 & L4 & L5 -->|Reads credentials cold start| SM
+    SM -->|clientId, clientSecret, domain| L1
 
     L1 & L2 & L3 & L4 & L5 -->|Calls Auth0 API| A0
     L1 & L2 & L3 & L4 & L5 & L6 -->|Write audit record| DDB
@@ -129,12 +129,12 @@ flowchart TD
         S1[sessions_revoke] --> S2[tokens_revoke] --> S3[user_scramble_password]
     end
 
-    S3 --> SCRAMBLE_OK{scramble\nsucceeded?}
+    S3 --> SCRAMBLE_OK{scramble succeeded?}
 
-    SCRAMBLE_OK -->|yes — skip block| EMAIL_GATE
-    SCRAMBLE_OK -->|no — fallback| S4[user_block]
+    SCRAMBLE_OK -->|yes - skip block| EMAIL_GATE
+    SCRAMBLE_OK -->|no - fallback| S4[user_block]
 
-    S4 --> BLOCK_OK{block\nsucceeded?}
+    S4 --> BLOCK_OK{block succeeded?}
     BLOCK_OK -->|yes| EMAIL_GATE
     BLOCK_OK -->|no| SKIP_EMAIL[skip email]
 
@@ -143,7 +143,7 @@ flowchart TD
     S5 --> LOG
     SKIP_EMAIL --> LOG
 
-    LOG[console.log summary\nof all invoked steps] --> RESPONSE
+    LOG[console.log summary] --> RESPONSE
 
     subgraph Response
         RESPONSE{outcomes}
@@ -180,13 +180,13 @@ flowchart TD
 graph TD
     STACK["CIAUserManagementStack"]
 
-    STACK --> ATC["AuditTableConstruct\nDynamoDB table\nPAY_PER_REQUEST | TTL 90d\nPITR on prod"]
-    STACK --> LLC["LambdaLayerConstruct\nShared Layer\nauth0 + AWS SDK"]
-    STACK --> AGC["ApiGatewayConstruct\nREST API\nThrottle: 100rps / burst 200"]
-    STACK --> FNS["6 x NodejsFunction\n256MB | 30s timeout\n(FullLogout: 120s)"]
+    STACK --> ATC["AuditTableConstruct - DynamoDB PAY_PER_REQUEST TTL 90d PITR on prod"]
+    STACK --> LLC["LambdaLayerConstruct - Shared Layer auth0 + AWS SDK"]
+    STACK --> AGC["ApiGatewayConstruct - REST API Throttle 100rps burst 200"]
+    STACK --> FNS["6 x NodejsFunction - 256MB 30s timeout FullLogout 120s"]
 
-    FNS --> IAM["IAM Policy\nsecretsmanager:GetSecretValue\n/cia/auth0/m2m-credentials"]
-    FNS --> DDB_GRANT["DynamoDB\ngrantWriteData"]
+    FNS --> IAM["IAM Policy - secretsmanager:GetSecretValue /cia/auth0/m2m-credentials"]
+    FNS --> DDB_GRANT["DynamoDB grantWriteData"]
 
     AGC --> FNS
 ```
