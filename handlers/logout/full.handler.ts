@@ -33,8 +33,9 @@ interface LogoutRequestBody {
  * Step 0 — if skipBlockUser=false (opt-in):
  *   account/block
  *
- * Phase 1 — Sequential (always runs):
- *   sessions/revoke → tokens/revoke
+ * Phase 1 — Parallel (always runs):
+ *   sessions/revoke ┐ fired concurrently via Promise.all — both are 202 fire-and-forget
+ *   tokens/revoke   ┘
  *
  * Phase 2 — if skipScramblePassword=false (default):
  *   account/scramble-password
@@ -74,9 +75,11 @@ export const handler: APIGatewayProxyHandler = async (event) => {
     blockResult = await callStep('user_block', `${userBase}/account/block`, userId);
   }
 
-  // ── Phase 1: Sequential (always) ──────────────────────────────────────────
-  const sessionsResult = await callStep('sessions_revoke', `${userBase}/sessions/revoke`, userId);
-  const tokensResult = await callStep('tokens_revoke', `${userBase}/tokens/revoke`, userId);
+  // ── Phase 1: Parallel (always) — both are fire-and-forget 202s with no dependency
+  const [sessionsResult, tokensResult] = await Promise.all([
+    callStep('sessions_revoke', `${userBase}/sessions/revoke`, userId),
+    callStep('tokens_revoke', `${userBase}/tokens/revoke`, userId),
+  ]);
 
   // ── Phase 2: Scramble password (default on) ────────────────────────────────
   let scrambleResult: StepResult | undefined;

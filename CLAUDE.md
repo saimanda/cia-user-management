@@ -75,7 +75,7 @@ Runtime flags (optional request body):
   skipNotification:     default false — skips notifications/password-email only
 
 Step 0 (if skipBlockUser=false):   user_block
-Phase 1 — always sequential:       sessions_revoke → tokens_revoke
+Phase 1 — always parallel (Promise.all): sessions_revoke & tokens_revoke
 Phase 2 (if !skipScramblePassword): user_scramble_password
 Phase 3 (if scramble ran AND scramble succeeded AND !skipNotification): notifications_password_email
 No block fallback for failed scramble — block is only invoked explicitly via skipBlockUser=false.

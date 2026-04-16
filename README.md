@@ -177,15 +177,15 @@ flowchart TD
     PARSE --> SKIP_BLOCK{skipBlockUser? default true}
 
     SKIP_BLOCK -->|false - opt-in| S0[user_block]
-    SKIP_BLOCK -->|true - skip block| S1
+    SKIP_BLOCK -->|true - skip| Phase1
 
-    S0 --> S1
+    S0 --> Phase1
 
-    subgraph Phase1["Phase 1 — Sequential always"]
-        S1[sessions_revoke] --> S2[tokens_revoke]
+    subgraph Phase1["Phase 1 — Parallel via Promise.all"]
+        S1[sessions_revoke] & S2[tokens_revoke]
     end
 
-    S2 --> SKIP_SCRAMBLE{skipScramblePassword? default false}
+    Phase1 --> SKIP_SCRAMBLE{skipScramblePassword? default false}
     SKIP_SCRAMBLE -->|true - skip| LOG
     SKIP_SCRAMBLE -->|false - run| S3[user_scramble_password]
 
