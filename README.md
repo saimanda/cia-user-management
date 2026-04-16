@@ -8,8 +8,8 @@ AWS CDK stack for NCA's **CIA (Customer Identity & Access) Platform**. This is t
 
 | Layer | Technology |
 |---|---|
-| Runtime | Node.js 18, TypeScript (strict) |
-| IaC | AWS CDK v2 (v2.135.0) |
+| Runtime | Node.js 22 (configurable), TypeScript (strict) |
+| IaC | AWS CDK v2 (v2.250.0) |
 | Auth0 SDK | `auth0` npm package — `ManagementClient` |
 | Testing | Jest + ts-jest |
 | Linting | ESLint + Prettier |
@@ -264,9 +264,17 @@ graph TD
 | `AUTH0_CONNECTION` | CDK stack | `NewsCorp-Australia` | Auth0 database connection for `scramble-password` |
 | `API_BASE_URL` | CDK stack | — | API Gateway base URL (injected into `FullLogout` only) |
 
-Override `AUTH0_CONNECTION` per stage via CDK context:
+### CDK context overrides
+
+| Context key | Default | Example |
+|---|---|---|
+| `stage` | — | `-c stage=sit` |
+| `auth0Connection` | `NewsCorp-Australia` | `-c auth0Connection=NewsCorp-SIT` |
+| `nodeVersion` | `22` | `-c nodeVersion=20` |
+
 ```bash
-cdk deploy -c stage=sit -c auth0Connection=NewsCorp-SIT
+# Override Node version at deploy time
+cdk deploy -c stage=sit -c nodeVersion=20
 ```
 
 ---
@@ -275,6 +283,7 @@ cdk deploy -c stage=sit -c auth0Connection=NewsCorp-SIT
 
 ```
 .
+├── .nvmrc                                   # Node.js version pin (22)
 ├── .github/
 │   └── workflows/
 │       ├── ci.yml                           # Lint, build, test on push/PR
@@ -416,4 +425,5 @@ npm run test:coverage
 | DynamoDB removal policy | DESTROY | RETAIN |
 | Point-in-time recovery | off | on |
 | Lambda bundling | unminified | minified |
+| Lambda runtime | `NODEJS_22_X` (default) | `NODEJS_22_X` (default) |
 | Stack name | `CIAUserManagement-sit` | `CIAUserManagement-prod` |

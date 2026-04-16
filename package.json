@@ -2,6 +2,9 @@
   "name": "cia-user-management",
   "version": "1.0.0",
   "description": "AWS CDK stack for NCA CIA Platform — User Management domain",
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "build": "tsc",
     "watch": "tsc -w",
@@ -14,10 +17,10 @@
   "devDependencies": {
     "@types/aws-lambda": "^8.10.136",
     "@types/jest": "^29.5.12",
-    "@types/node": "^18.19.31",
+    "@types/node": "^22.0.0",
     "@typescript-eslint/eslint-plugin": "^7.6.0",
     "@typescript-eslint/parser": "^7.6.0",
-    "aws-cdk": "2.135.0",
+    "aws-cdk": "2.1118.0",
     "esbuild": "^0.20.2",
     "eslint": "^8.57.0",
     "eslint-config-prettier": "^9.1.0",
@@ -31,7 +34,7 @@
   "dependencies": {
     "@aws-sdk/client-secrets-manager": "^3.540.0",
     "auth0": "^4.3.1",
-    "aws-cdk-lib": "2.135.0",
+    "aws-cdk-lib": "2.250.0",
     "constructs": "^10.3.0"
   }
 }

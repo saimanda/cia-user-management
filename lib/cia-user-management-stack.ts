@@ -39,15 +39,25 @@ export class CIAUserManagementStack extends cdk.Stack {
       AUTH0_CONNECTION: (this.node.tryGetContext('auth0Connection') as string | undefined) ?? 'NewsCorp-Australia',
     };
 
+    // ── Lambda runtime — configurable via CDK context ────────────────────────
+    // Override: cdk deploy -c nodeVersion=20
+    const nodeVersion = (this.node.tryGetContext('nodeVersion') as string | undefined) ?? '22';
+    const runtimeMap: Record<string, lambda.Runtime> = {
+      '18': lambda.Runtime.NODEJS_18_X,
+      '20': lambda.Runtime.NODEJS_20_X,
+      '22': lambda.Runtime.NODEJS_22_X,
+    };
+    const lambdaRuntime = runtimeMap[nodeVersion] ?? lambda.Runtime.NODEJS_22_X;
+
     const commonBundling: BundlingOptions = {
-      // AWS SDK v3 is available in Node.js 18 Lambda runtime — no need to bundle it.
+      // AWS SDK v3 is available in the Lambda runtime — no need to bundle it.
       externalModules: ['@aws-sdk/*'],
       minify: stage === 'prod',
       sourceMap: true,
     };
 
     const commonFnProps = {
-      runtime: lambda.Runtime.NODEJS_18_X,
+      runtime: lambdaRuntime,
       memorySize: 256,
       timeout: cdk.Duration.seconds(30),
       environment: commonEnv,

@@ -7,11 +7,12 @@ Lambda endpoints. This is the first domain stack in the CIA Identity Platform
 agentic architecture.
 
 ## Tech Stack
-- Runtime: Node.js 18, TypeScript (strict)
-- IaC: AWS CDK v2
+- Runtime: Node.js 22 (configurable via CDK context nodeVersion), TypeScript (strict)
+- IaC: AWS CDK v2 (v2.250.0)
 - Auth0 SDK: auth0 (npm) — ManagementClient
 - Testing: Jest
 - Linting: ESLint + Prettier
+- Node version pin: .nvmrc (22)
 
 ## Architecture Rules (NON-NEGOTIABLE)
 1. Every Auth0 Management API operation = its own Lambda handler file
@@ -45,6 +46,11 @@ interface OperationResult {
 - Region: ap-southeast-2
 - Stage: sit | uat | prod (via CDK context: cdk deploy -c stage=uat)
 - Stack naming: CIAUserManagement-{stage}
+
+## CDK Context Keys
+- stage: sit | uat | prod
+- nodeVersion: 18 | 20 | 22 (default: 22) — controls Lambda runtime
+- auth0Connection: Auth0 DB connection name (default: NewsCorp-Australia)
 
 ## Environment Variables
 - STAGE: deployment stage (sit | uat | prod)
@@ -88,6 +94,7 @@ Required GitHub secrets: AWS_ROLE_ARN
 Required GitHub environments: sit, uat, prod
 
 ## File Structure
+.nvmrc                         ← Node.js version pin (22)
 .github/
   workflows/
     ci.yml
