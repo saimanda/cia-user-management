@@ -232,14 +232,14 @@ graph TD
 
 | Variable | Set by | Default | Description |
 |---|---|---|---|
-| `STAGE` | CDK stack | — | Deployment stage (`dev`, `uat`, `prod`) |
+| `STAGE` | CDK stack | — | Deployment stage (`sit`, `uat`, `prod`) |
 | `AUDIT_TABLE_NAME` | CDK stack | — | DynamoDB audit table name |
 | `AUTH0_CONNECTION` | CDK stack | `NewsCorp-Australia` | Auth0 database connection for `scramble-password` |
 | `API_BASE_URL` | CDK stack | — | API Gateway base URL (injected into `FullLogout` only) |
 
 Override `AUTH0_CONNECTION` per stage via CDK context:
 ```bash
-cdk deploy -c stage=dev -c auth0Connection=NewsCorp-Dev
+cdk deploy -c stage=sit -c auth0Connection=NewsCorp-SIT
 ```
 
 ---
@@ -248,6 +248,10 @@ cdk deploy -c stage=dev -c auth0Connection=NewsCorp-Dev
 
 ```
 .
+├── .github/
+│   └── workflows/
+│       ├── ci.yml                           # Lint, build, test on push/PR
+│       └── deploy.yml                       # CDK deploy per stage
 ├── bin/
 │   └── app.ts                               # CDK entry point
 ├── lib/
@@ -291,7 +295,53 @@ cdk deploy -c stage=dev -c auth0Connection=NewsCorp-Dev
 
 ---
 
+## CI/CD
+
+### Branch Strategy
+
+| Branch | Purpose |
+|---|---|
+| `main` | Production-ready code. CI runs on every push. SIT deploys automatically. |
+| `release/next` | Upcoming release staging. CI runs on every push. No auto-deploy. |
+
+### GitHub Actions Workflows
+
+#### `ci.yml` — Lint, Build & Test
+
+Triggers on push to `main` or `release/next`, and on PRs targeting `main`.
+
+```
+Install deps → Lint (ESLint) → Build (tsc) → Test with coverage → Upload coverage artifact
+```
+
+#### `deploy.yml` — CDK Deploy
+
+| Stage | Trigger | Guard |
+|---|---|---|
+| `sit` | Auto on push to `main` | None |
+| `uat` | Manual `workflow_dispatch` | Select `uat` in stage dropdown |
+| `prod` | Manual `workflow_dispatch` | Select `prod` + type `CONFIRM` |
+
+Uses **OIDC keyless auth** (`aws-actions/configure-aws-credentials`) — no long-lived AWS keys stored in GitHub.
+
+### Required GitHub Setup
+
+Before workflows can deploy, configure the following in the repository:
+
+1. **Repository secret:** `AWS_ROLE_ARN` — ARN of the IAM role GitHub Actions will assume via OIDC
+2. **Environments:** Create `sit`, `uat`, `prod` in _Settings → Environments_ and attach required reviewers or protection rules as needed
+
+---
+
 ## Deployment
+
+### Via GitHub Actions (recommended)
+
+- **SIT** — push to `main`
+- **UAT** — trigger `deploy.yml` manually, select `uat`
+- **Prod** — trigger `deploy.yml` manually, select `prod`, type `CONFIRM`
+
+### Manual (local)
 
 ```bash
 # Install dependencies
@@ -300,13 +350,13 @@ npm install
 # Build TypeScript
 npm run build
 
-# Deploy to a stage (dev | uat | prod)
-cdk deploy -c stage=dev
+# Deploy to a stage (sit | uat | prod)
+cdk deploy -c stage=sit
 cdk deploy -c stage=uat
 cdk deploy -c stage=prod
 
 # Override Auth0 connection per stage
-cdk deploy -c stage=uat -c auth0Connection=NewsCorp-UAT
+cdk deploy -c stage=sit -c auth0Connection=NewsCorp-SIT
 ```
 
 ### AWS Secrets Manager — required before first deploy
@@ -334,9 +384,9 @@ npm run test:coverage
 
 ## Stage Behaviour Differences
 
-| Feature | dev / uat | prod |
+| Feature | sit / uat | prod |
 |---|---|---|
 | DynamoDB removal policy | DESTROY | RETAIN |
 | Point-in-time recovery | off | on |
 | Lambda bundling | unminified | minified |
-| Stack name | `CIAUserManagement-dev` | `CIAUserManagement-prod` |
+| Stack name | `CIAUserManagement-sit` | `CIAUserManagement-prod` |
