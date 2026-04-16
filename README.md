@@ -154,31 +154,49 @@ sequenceDiagram
 
 ## Full Logout Orchestration Pipeline
 
-The `logout/full` handler runs a **conditional step pipeline** — not a simple parallel fan-out.
+The `logout/full` handler runs a **conditional step pipeline** controlled by two optional runtime flags in the request body.
+
+### Runtime flags
+
+| Flag | Type | Default | Effect |
+|---|---|---|---|
+| `skipScramblePassword` | boolean | `false` | Skips scramble-password, block fallback, and email |
+| `skipNotification` | boolean | `false` | Skips notifications/password-email only |
+
+```json
+POST /identity/users/{userId}/logout/full
+{ "skipScramblePassword": false, "skipNotification": false }
+```
+
+Both flags default to `false` — the full pipeline runs unless explicitly opted out.
 
 ```mermaid
 flowchart TD
-    START([POST /logout/full]) --> S1
+    START([POST /logout/full]) --> PARSE[Parse request body flags]
+    PARSE --> S1
 
     subgraph Phase1["Phase 1 — Sequential always"]
-        S1[sessions_revoke] --> S2[tokens_revoke] --> S3[user_scramble_password]
+        S1[sessions_revoke] --> S2[tokens_revoke]
     end
 
-    S3 --> SCRAMBLE_OK{scramble succeeded?}
+    S2 --> SKIP_SCRAMBLE{skipScramblePassword?}
+    SKIP_SCRAMBLE -->|true - skip password phase| LOG
+    SKIP_SCRAMBLE -->|false - run scramble| S3[user_scramble_password]
 
+    S3 --> SCRAMBLE_OK{scramble succeeded?}
     SCRAMBLE_OK -->|yes - skip block| EMAIL_GATE
     SCRAMBLE_OK -->|no - fallback| S4[user_block]
 
     S4 --> BLOCK_OK{block succeeded?}
     BLOCK_OK -->|yes| EMAIL_GATE
-    BLOCK_OK -->|no| SKIP_EMAIL[skip email]
+    BLOCK_OK -->|no| LOG
 
-    EMAIL_GATE([account action ok?]) --> S5[notifications_password_email]
+    EMAIL_GATE([account action ok?]) --> SKIP_NOTIFY{skipNotification?}
+    SKIP_NOTIFY -->|true| LOG
+    SKIP_NOTIFY -->|false| S5[notifications_password_email]
 
     S5 --> LOG
-    SKIP_EMAIL --> LOG
-
-    LOG[console.log summary] --> RESPONSE
+    LOG[console.log summary incl. skipped steps] --> RESPONSE
 
     subgraph Response
         RESPONSE{outcomes}
@@ -190,12 +208,14 @@ flowchart TD
 
 ### Step execution by scenario
 
-| Scenario | Steps invoked | fetch calls | Response |
+| Flags | Steps invoked | fetch calls | Response |
 |---|---|---|---|
-| All succeed | sessions, tokens, scramble, email | 4 | `200` affectedCount: 4 |
-| Scramble fails, block ok, email ok | sessions, tokens, scramble, block, email | 5 | `207` affectedCount: 4 |
-| Scramble fails, block fails | sessions, tokens, scramble, block | 4 | `207` or `500` |
-| Everything fails | sessions, tokens, scramble, block | 4 | `500` |
+| none (defaults) — all succeed | sessions, tokens, scramble, email | 4 | `200` affectedCount: 4 |
+| none — scramble fails, block ok | sessions, tokens, scramble, block, email | 5 | `207` affectedCount: 4 |
+| none — scramble + block fail | sessions, tokens, scramble, block | 4 | `207` or `500` |
+| `skipScramblePassword=true` | sessions, tokens | 2 | `200` affectedCount: 2 |
+| `skipNotification=true` — scramble ok | sessions, tokens, scramble | 3 | `200` affectedCount: 3 |
+| `skipNotification=true` — scramble fails | sessions, tokens, scramble, block | 4 | `207` affectedCount: 3 |
 
 ### Console log summary (emitted on every invocation)
 
@@ -205,6 +225,13 @@ flowchart TD
   ✓ tokens_revoke: success
   ✓ user_scramble_password: success
   ✓ notifications_password_email: success
+
+[logout/full] userId=auth0|xyz | 2/2 steps succeeded [skipped: user_scramble_password, user_block, notifications_password_email]
+  ✓ sessions_revoke: success
+  ✓ tokens_revoke: success
+  - user_scramble_password: skipped
+  - user_block: skipped
+  - notifications_password_email: skipped
 ```
 
 ---
