@@ -82,7 +82,7 @@ describe('logout/full handler', () => {
   // fetch calls: 4
 
   it('runs full pipeline by default when no flags provided', async () => {
-    global.fetch = jest.fn().mockResolvedValue(okFetch()) as jest.Mock;
+    global.fetch = jest.fn().mockResolvedValue(okFetch());
 
     const response = await handler(makeEvent(userId), {} as never, () => undefined);
     if (!response) throw new Error('No response');
@@ -95,7 +95,7 @@ describe('logout/full handler', () => {
   });
 
   it('runs full pipeline when skipNotification explicitly set to false', async () => {
-    global.fetch = jest.fn().mockResolvedValue(okFetch()) as jest.Mock;
+    global.fetch = jest.fn().mockResolvedValue(okFetch());
 
     const response = await handler(
       makeEvent(userId, { skipNotification: false }),
@@ -113,7 +113,7 @@ describe('logout/full handler', () => {
   // fetch calls: 5
 
   it('runs block as step 0 when skipBlockUser=false, then full pipeline', async () => {
-    global.fetch = jest.fn().mockResolvedValue(okFetch()) as jest.Mock;
+    global.fetch = jest.fn().mockResolvedValue(okFetch());
 
     const response = await handler(
       makeEvent(userId, { skipBlockUser: false }),
@@ -134,7 +134,7 @@ describe('logout/full handler', () => {
     global.fetch = jest.fn().mockImplementation(() => {
       callCount++;
       return callCount === 1 ? failFetch('user_block', 'block failed') : okFetch();
-    }) as jest.Mock;
+    });
 
     const response = await handler(
       makeEvent(userId, { skipBlockUser: false }),
@@ -156,7 +156,7 @@ describe('logout/full handler', () => {
   // fetch calls: 3
 
   it('skips email only when skipNotification=true and scramble succeeds', async () => {
-    global.fetch = jest.fn().mockResolvedValue(okFetch()) as jest.Mock;
+    global.fetch = jest.fn().mockResolvedValue(okFetch());
 
     const response = await handler(
       makeEvent(userId, { skipNotification: true }),
@@ -178,7 +178,7 @@ describe('logout/full handler', () => {
       callCount++;
       // calls 1+2 are sessions+tokens (parallel), call 3 is scramble
       return callCount === 3 ? failFetch('user_scramble_password', 'connection error') : okFetch();
-    }) as jest.Mock;
+    });
 
     const response = await handler(
       makeEvent(userId, { skipNotification: true }),
@@ -202,7 +202,7 @@ describe('logout/full handler', () => {
     global.fetch = jest.fn().mockImplementation(() => {
       callCount++;
       return callCount === 3 ? failFetch('user_scramble_password', 'connection error') : okFetch();
-    }) as jest.Mock;
+    });
 
     const response = await handler(makeEvent(userId), {} as never, () => undefined);
     if (!response) throw new Error('No response');
@@ -219,7 +219,7 @@ describe('logout/full handler', () => {
   // fetch calls: 3
 
   it('returns 500 when all invoked steps fail', async () => {
-    global.fetch = jest.fn().mockResolvedValue(failFetch('op', 'downstream error')) as jest.Mock;
+    global.fetch = jest.fn().mockResolvedValue(failFetch('op', 'downstream error'));
 
     const response = await handler(makeEvent(userId), {} as never, () => undefined);
     if (!response) throw new Error('No response');
@@ -234,7 +234,7 @@ describe('logout/full handler', () => {
       callCount++;
       if (callCount === 1) return Promise.reject(new Error('Network failure'));
       return okFetch();
-    }) as jest.Mock;
+    });
 
     const response = await handler(makeEvent(userId), {} as never, () => undefined);
     if (!response) throw new Error('No response');
@@ -248,11 +248,11 @@ describe('logout/full handler', () => {
   // ── Console log summary ───────────────────────────────────────────────────────
 
   it('logs all invoked steps and user_block as skipped by default', async () => {
-    global.fetch = jest.fn().mockResolvedValue(okFetch()) as jest.Mock;
+    global.fetch = jest.fn().mockResolvedValue(okFetch());
 
     await handler(makeEvent(userId), {} as never, () => undefined);
 
-    const logArg = (console.log as jest.Mock).mock.calls[0][0] as string;
+    const logArg = ((console.log as jest.Mock).mock.calls as string[][])[0][0];
     expect(logArg).toMatch(/sessions_revoke/);
     expect(logArg).toMatch(/tokens_revoke/);
     expect(logArg).toMatch(/user_scramble_password/);
@@ -261,27 +261,27 @@ describe('logout/full handler', () => {
   });
 
   it('logs block as invoked when skipBlockUser=false', async () => {
-    global.fetch = jest.fn().mockResolvedValue(okFetch()) as jest.Mock;
+    global.fetch = jest.fn().mockResolvedValue(okFetch());
 
     await handler(makeEvent(userId, { skipBlockUser: false }), {} as never, () => undefined);
 
-    const logArg = (console.log as jest.Mock).mock.calls[0][0] as string;
+    const logArg = ((console.log as jest.Mock).mock.calls as string[][])[0][0];
     expect(logArg).toMatch(/user_block/);
     expect(logArg).not.toMatch(/user_block.*skipped/);
   });
 
   it('logs skipped notification when skipNotification=true', async () => {
-    global.fetch = jest.fn().mockResolvedValue(okFetch()) as jest.Mock;
+    global.fetch = jest.fn().mockResolvedValue(okFetch());
 
     await handler(makeEvent(userId, { skipNotification: true }), {} as never, () => undefined);
 
-    const logArg = (console.log as jest.Mock).mock.calls[0][0] as string;
+    const logArg = ((console.log as jest.Mock).mock.calls as string[][])[0][0];
     expect(logArg).toMatch(/skipped/);
     expect(logArg).toMatch(/notifications_password_email/);
   });
 
   it('handles malformed request body gracefully and uses defaults', async () => {
-    global.fetch = jest.fn().mockResolvedValue(okFetch()) as jest.Mock;
+    global.fetch = jest.fn().mockResolvedValue(okFetch());
 
     const event = makeEvent(userId);
     (event as { body: string }).body = 'not-valid-json';

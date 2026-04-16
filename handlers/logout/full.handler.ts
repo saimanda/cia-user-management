@@ -1,5 +1,11 @@
 import { APIGatewayProxyHandler } from 'aws-lambda';
-import { buildResponse, failedResult, partialResult, successResult, OperationResult } from '../../shared/response';
+import {
+  buildResponse,
+  failedResult,
+  partialResult,
+  successResult,
+  OperationResult,
+} from '../../shared/response';
 
 const OPERATION = 'logout_full';
 
@@ -50,12 +56,18 @@ export const handler: APIGatewayProxyHandler = async (event) => {
   const userId = event.pathParameters?.userId;
 
   if (!userId) {
-    return buildResponse(400, failedResult(OPERATION, '', 'userId path parameter is required', false));
+    return buildResponse(
+      400,
+      failedResult(OPERATION, '', 'userId path parameter is required', false),
+    );
   }
 
   const apiBaseUrl = process.env.API_BASE_URL;
   if (!apiBaseUrl) {
-    return buildResponse(500, failedResult(OPERATION, userId, 'API_BASE_URL environment variable is not set', false));
+    return buildResponse(
+      500,
+      failedResult(OPERATION, userId, 'API_BASE_URL environment variable is not set', false),
+    );
   }
 
   // ── Parse runtime flags ────────────────────────────────────────────────────
@@ -77,12 +89,20 @@ export const handler: APIGatewayProxyHandler = async (event) => {
   ]);
 
   // ── Phase 2: Scramble password (always) ───────────────────────────────────
-  const scrambleResult = await callStep('user_scramble_password', `${userBase}/account/scramble-password`, userId);
+  const scrambleResult = await callStep(
+    'user_scramble_password',
+    `${userBase}/account/scramble-password`,
+    userId,
+  );
 
   // ── Phase 3: Notification — scramble succeeded → check skipNotification ───
   let emailResult: StepResult | undefined;
   if (scrambleResult.ok && !skipNotification) {
-    emailResult = await callStep('notifications_password_email', `${userBase}/notifications/password-email`, userId);
+    emailResult = await callStep(
+      'notifications_password_email',
+      `${userBase}/notifications/password-email`,
+      userId,
+    );
   }
 
   // ── Collect all invoked steps ──────────────────────────────────────────────
@@ -103,14 +123,17 @@ export const handler: APIGatewayProxyHandler = async (event) => {
   if (skipNotification) skipped.push('notifications_password_email');
 
   const invokedLines = invokedResults.map(
-    (r) => `  ${r.ok ? '✓' : '✗'} ${r.name}: ${r.result.status}${r.result.reason ? ` — ${r.result.reason}` : ''}`,
+    (r) =>
+      `  ${r.ok ? '✓' : '✗'} ${r.name}: ${r.result.status}${r.result.reason ? ` — ${r.result.reason}` : ''}`,
   );
   const skippedLines = skipped.map((s) => `  - ${s}: skipped`);
 
+  // eslint-disable-next-line no-console
   console.log(
     `[logout/full] userId=${userId} | ${succeeded.length}/${invokedResults.length} steps succeeded` +
-    (skipped.length ? ` [skipped: ${skipped.join(', ')}]` : '') +
-    '\n' + [...invokedLines, ...skippedLines].join('\n'),
+      (skipped.length ? ` [skipped: ${skipped.join(', ')}]` : '') +
+      '\n' +
+      [...invokedLines, ...skippedLines].join('\n'),
   );
 
   // ── Response ───────────────────────────────────────────────────────────────
