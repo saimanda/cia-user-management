@@ -36,7 +36,8 @@ export class CIAUserManagementStack extends cdk.Stack {
       STAGE: stage,
       AUDIT_TABLE_NAME: auditTable.table.tableName,
       NODE_OPTIONS: '--enable-source-maps',
-      AUTH0_CONNECTION: (this.node.tryGetContext('auth0Connection') as string | undefined) ?? 'NewsCorp-Australia',
+      AUTH0_CONNECTION:
+        (this.node.tryGetContext('auth0Connection') as string | undefined) ?? 'NewsCorp-Australia',
     };
 
     // ── Lambda runtime — configurable via CDK context ────────────────────────
@@ -99,7 +100,13 @@ export class CIAUserManagementStack extends cdk.Stack {
     });
 
     // Grant each atomic handler access to the Auth0 secret and audit table.
-    for (const fn of [sessionsRevokeFn, tokensRevokeFn, userBlockFn, scramblePasswordFn, passwordEmailFn]) {
+    for (const fn of [
+      sessionsRevokeFn,
+      tokensRevokeFn,
+      userBlockFn,
+      scramblePasswordFn,
+      passwordEmailFn,
+    ]) {
       fn.addToRolePolicy(secretsPolicy);
       auditTable.table.grantWriteData(fn);
     }

@@ -26,8 +26,7 @@ export class AuditTableConstruct extends Construct {
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
       timeToLiveAttribute: 'ttl',
       pointInTimeRecovery: props.stage === 'prod',
-      removalPolicy:
-        props.stage === 'prod' ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY,
+      removalPolicy: props.stage === 'prod' ? cdk.RemovalPolicy.RETAIN : cdk.RemovalPolicy.DESTROY,
       encryption: dynamodb.TableEncryption.AWS_MANAGED,
     });
 

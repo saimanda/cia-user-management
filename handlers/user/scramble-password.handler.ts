@@ -44,10 +44,7 @@ export const handler: APIGatewayProxyHandler = async (event) => {
   } catch (error) {
     const reason = extractErrorMessage(error);
     const retryable = isRetryable(error);
-    return buildResponse(
-      retryable ? 503 : 500,
-      failedResult(OPERATION, userId, reason, retryable),
-    );
+    return buildResponse(retryable ? 503 : 500, failedResult(OPERATION, userId, reason, retryable));
   }
 };
 

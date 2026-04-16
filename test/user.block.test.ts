@@ -70,10 +70,7 @@ describe('user/block handler', () => {
     expect(body.userId).toBe('auth0|test-user-123');
     // API returns the updated user object, not a count
     expect(body.affectedCount).toBeUndefined();
-    expect(mockUsersUpdate).toHaveBeenCalledWith(
-      { id: 'auth0|test-user-123' },
-      { blocked: true },
-    );
+    expect(mockUsersUpdate).toHaveBeenCalledWith({ id: 'auth0|test-user-123' }, { blocked: true });
   });
 
   it('returns 500 with retryable=false on 400 invalid request body error', async () => {
@@ -117,7 +114,9 @@ describe('user/block handler', () => {
 
   it('returns 500 with retryable=false on 403 insufficient scope error', async () => {
     mockUsersUpdate.mockRejectedValueOnce(
-      new Error('403 Insufficient scope; expected any of: update:users,update:users_app_metadata,update:current_user_metadata'),
+      new Error(
+        '403 Insufficient scope; expected any of: update:users,update:users_app_metadata,update:current_user_metadata',
+      ),
     );
 
     const response = await handler(makeEvent('auth0|test-user-123'), {} as never, () => undefined);

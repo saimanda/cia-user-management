@@ -15,7 +15,10 @@ export const handler: APIGatewayProxyHandler = async (event) => {
   const userId = event.pathParameters?.userId;
 
   if (!userId) {
-    return buildResponse(400, failedResult(OPERATION, '', 'userId path parameter is required', false));
+    return buildResponse(
+      400,
+      failedResult(OPERATION, '', 'userId path parameter is required', false),
+    );
   }
 
   try {
@@ -27,9 +30,6 @@ export const handler: APIGatewayProxyHandler = async (event) => {
   } catch (error) {
     const reason = extractErrorMessage(error);
     const retryable = isRetryable(error);
-    return buildResponse(
-      retryable ? 503 : 500,
-      failedResult(OPERATION, userId, reason, retryable),
-    );
+    return buildResponse(retryable ? 503 : 500, failedResult(OPERATION, userId, reason, retryable));
   }
 };

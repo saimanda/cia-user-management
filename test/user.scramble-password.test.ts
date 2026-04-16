@@ -105,8 +105,10 @@ describe('user/scramble-password handler', () => {
     await handler(makeEvent('auth0|test-user-123'), {} as never, () => undefined);
     await handler(makeEvent('auth0|test-user-123'), {} as never, () => undefined);
 
-    const pass1 = (mockUsersUpdate.mock.calls[0] as [{ id: string }, { password: string }])[1].password;
-    const pass2 = (mockUsersUpdate.mock.calls[1] as [{ id: string }, { password: string }])[1].password;
+    const pass1 = (mockUsersUpdate.mock.calls[0] as [{ id: string }, { password: string }])[1]
+      .password;
+    const pass2 = (mockUsersUpdate.mock.calls[1] as [{ id: string }, { password: string }])[1]
+      .password;
     expect(pass1).not.toBe(pass2);
   });
 

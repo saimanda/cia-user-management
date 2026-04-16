@@ -1,8 +1,5 @@
 import { ManagementClient } from 'auth0';
-import {
-  SecretsManagerClient,
-  GetSecretValueCommand,
-} from '@aws-sdk/client-secrets-manager';
+import { SecretsManagerClient, GetSecretValueCommand } from '@aws-sdk/client-secrets-manager';
 
 interface Auth0Credentials {
   clientId: string;
