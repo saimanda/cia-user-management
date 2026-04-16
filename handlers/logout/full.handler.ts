@@ -39,7 +39,7 @@ interface LogoutRequestBody {
  * Phase 2 — if skipScramblePassword=false (default):
  *   account/scramble-password
  *
- * Phase 3 — if skipScramblePassword=false AND skipNotification=false AND scramble succeeded:
+ * Phase 3 — if scramble ran AND scramble succeeded AND skipNotification=false:
  *   notifications/password-email
  *
  * All invoked/skipped step statuses are summarised in a console.log at the end.
@@ -84,9 +84,9 @@ export const handler: APIGatewayProxyHandler = async (event) => {
     scrambleResult = await callStep('user_scramble_password', `${userBase}/account/scramble-password`, userId);
   }
 
-  // ── Phase 3: Notification — only if scramble ran and succeeded ─────────────
+  // ── Phase 3: Notification — scramble ran → scramble succeeded → check skipNotification
   let emailResult: StepResult | undefined;
-  if (!skipScramblePassword && !skipNotification && scrambleResult?.ok) {
+  if (!skipScramblePassword && scrambleResult?.ok && !skipNotification) {
     emailResult = await callStep('notifications_password_email', `${userBase}/notifications/password-email`, userId);
   }
 
