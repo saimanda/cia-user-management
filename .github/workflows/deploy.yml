@@ -1,0 +1,135 @@
+name: CDK Deploy
+
+on:
+  # SIT auto-deploys on every push to main
+  push:
+    branches:
+      - main
+
+  # UAT and prod are manually triggered
+  workflow_dispatch:
+    inputs:
+      stage:
+        description: Stage to deploy
+        required: true
+        type: choice
+        options:
+          - uat
+          - prod
+      confirm_prod:
+        description: 'Type CONFIRM to deploy to prod'
+        required: false
+        default: ''
+
+permissions:
+  id-token: write   # required for OIDC
+  contents: read
+
+env:
+  AWS_REGION: ap-southeast-2
+
+jobs:
+  # ── SIT — triggered automatically on push to main ───────────────────────────
+  deploy-sit:
+    name: Deploy to SIT
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+    environment: sit
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: CDK Synth
+        run: npx cdk synth -c stage=sit
+
+      - name: CDK Deploy
+        run: npx cdk deploy CIAUserManagement-sit -c stage=sit --require-approval never
+
+  # ── UAT — manual trigger only ────────────────────────────────────────────────
+  deploy-uat:
+    name: Deploy to UAT
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.stage == 'uat'
+    environment: uat
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: CDK Synth
+        run: npx cdk synth -c stage=uat
+
+      - name: CDK Deploy
+        run: npx cdk deploy CIAUserManagement-uat -c stage=uat --require-approval never
+
+  # ── Prod — manual trigger with CONFIRM guard ─────────────────────────────────
+  deploy-prod:
+    name: Deploy to Prod
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.stage == 'prod' && github.event.inputs.confirm_prod == 'CONFIRM'
+    environment: prod
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: CDK Synth
+        run: npx cdk synth -c stage=prod
+
+      - name: CDK Deploy
+        run: npx cdk deploy CIAUserManagement-prod -c stage=prod --require-approval never
