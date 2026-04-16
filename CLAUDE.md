@@ -70,14 +70,13 @@ POST /logout/full                → handlers/logout/full.handler.ts
 
 ## Logout Full — Conditional Pipeline
 Runtime flags (optional request body):
-  skipBlockUser:        default true  — set false to block user as step 0 (before sessions/tokens)
-  skipScramblePassword: default false — skips scramble-password and notification
-  skipNotification:     default false — skips notifications/password-email only
+  skipBlockUser:    default true  — set false to block user as step 0 (before sessions/tokens)
+  skipNotification: default false — skips notifications/password-email only
 
-Step 0 (if skipBlockUser=false):   user_block
+Step 0 (if skipBlockUser=false):         user_block
 Phase 1 — always parallel (Promise.all): sessions_revoke & tokens_revoke
-Phase 2 (if !skipScramblePassword): user_scramble_password
-Phase 3 (if scramble ran AND scramble succeeded AND !skipNotification): notifications_password_email
+Phase 2 — always:                        user_scramble_password
+Phase 3 (if scramble succeeded AND !skipNotification): notifications_password_email
 No block fallback for failed scramble — block is only invoked explicitly via skipBlockUser=false.
 Console.log summary (incl. skipped steps) emitted at end of every invocation.
 

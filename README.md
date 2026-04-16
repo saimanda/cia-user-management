@@ -161,15 +161,14 @@ The `logout/full` handler runs a **conditional step pipeline** controlled by two
 | Flag | Type | Default | Effect |
 |---|---|---|---|
 | `skipBlockUser` | boolean | `true` | Set `false` to invoke `user_block` as step 0, before sessions/tokens |
-| `skipScramblePassword` | boolean | `false` | Skips scramble-password and notification |
 | `skipNotification` | boolean | `false` | Skips notifications/password-email only |
 
 ```json
 POST /identity/users/{userId}/logout/full
-{ "skipBlockUser": true, "skipScramblePassword": false, "skipNotification": false }
+{ "skipBlockUser": true, "skipNotification": false }
 ```
 
-`skipBlockUser` defaults to `true` — block is opt-in. `skipScramblePassword` and `skipNotification` default to `false` — scramble and email run unless explicitly opted out.
+`skipBlockUser` defaults to `true` — block is opt-in. `skipNotification` defaults to `false` — email runs when scramble succeeds unless explicitly opted out. `scramble-password` always runs.
 
 ```mermaid
 flowchart TD
@@ -185,9 +184,7 @@ flowchart TD
         S1[sessions_revoke] & S2[tokens_revoke]
     end
 
-    Phase1 --> SKIP_SCRAMBLE{skipScramblePassword? default false}
-    SKIP_SCRAMBLE -->|true - skip| LOG
-    SKIP_SCRAMBLE -->|false - run| S3[user_scramble_password]
+    Phase1 --> S3[user_scramble_password]
 
     S3 --> SCRAMBLE_OK{scramble succeeded?}
     SCRAMBLE_OK -->|no - skip email| LOG
@@ -215,8 +212,6 @@ flowchart TD
 | defaults — scramble fails | sessions, tokens, scramble | 3 | `207` affectedCount: 2 |
 | `skipBlockUser=false` — all succeed | block, sessions, tokens, scramble, email | 5 | `200` affectedCount: 5 |
 | `skipBlockUser=false` — block fails, rest ok | block, sessions, tokens, scramble, email | 5 | `207` affectedCount: 4 |
-| `skipScramblePassword=true` | sessions, tokens | 2 | `200` affectedCount: 2 |
-| `skipBlockUser=false, skipScramblePassword=true` | block, sessions, tokens | 3 | `200` affectedCount: 3 |
 | `skipNotification=true` — scramble ok | sessions, tokens, scramble | 3 | `200` affectedCount: 3 |
 | `skipNotification=true` — scramble fails | sessions, tokens, scramble | 3 | `207` affectedCount: 2 |
 
@@ -236,13 +231,6 @@ flowchart TD
   ✓ tokens_revoke: success
   ✓ user_scramble_password: success
   ✓ notifications_password_email: success
-
-[logout/full] userId=auth0|xyz | 2/2 steps succeeded [skipped: user_block, user_scramble_password, notifications_password_email]
-  ✓ sessions_revoke: success
-  ✓ tokens_revoke: success
-  - user_block: skipped
-  - user_scramble_password: skipped
-  - notifications_password_email: skipped
 ```
 
 ---

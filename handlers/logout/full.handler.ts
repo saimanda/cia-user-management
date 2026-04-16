@@ -13,12 +13,8 @@ interface LogoutRequestBody {
   /** Block the user BEFORE sessions/tokens revocation.
    *  Default: true — block step is skipped. Set to false to block first. */
   skipBlockUser?: boolean;
-  /** Skip the scramble-password step (and its notification).
-   *  Default: false — scramble-password runs. */
-  skipScramblePassword?: boolean;
   /** Skip the notifications/password-email step.
-   *  Default: false — notification is sent when scramble succeeded.
-   *  Ignored when skipScramblePassword is true. */
+   *  Default: false — notification is sent when scramble succeeded. */
   skipNotification?: boolean;
 }
 
@@ -26,9 +22,8 @@ interface LogoutRequestBody {
  * Orchestrates a full user logout using a conditional step pipeline.
  *
  * Runtime flags (optional request body):
- *   skipBlockUser        — default true  — set false to block user FIRST (step 0)
- *   skipScramblePassword — default false — skips scramble-password and notification
- *   skipNotification     — default false — skips notifications/password-email only
+ *   skipBlockUser    — default true  — set false to block user FIRST (step 0)
+ *   skipNotification — default false — skips notifications/password-email only
  *
  * Step 0 — if skipBlockUser=false (opt-in):
  *   account/block
@@ -37,10 +32,10 @@ interface LogoutRequestBody {
  *   sessions/revoke ┐ fired concurrently via Promise.all — both are 202 fire-and-forget
  *   tokens/revoke   ┘
  *
- * Phase 2 — if skipScramblePassword=false (default):
+ * Phase 2 — Always runs:
  *   account/scramble-password
  *
- * Phase 3 — if scramble ran AND scramble succeeded AND skipNotification=false:
+ * Phase 3 — if scramble succeeded AND skipNotification=false:
  *   notifications/password-email
  *
  * All invoked/skipped step statuses are summarised in a console.log at the end.
@@ -64,7 +59,7 @@ export const handler: APIGatewayProxyHandler = async (event) => {
   }
 
   // ── Parse runtime flags ────────────────────────────────────────────────────
-  const { skipBlockUser = true, skipScramblePassword = false, skipNotification = false } = parseBody(event.body);
+  const { skipBlockUser = true, skipNotification = false } = parseBody(event.body);
 
   const base = apiBaseUrl.replace(/\/$/, '');
   const userBase = `${base}/identity/users/${encodeURIComponent(userId)}`;
@@ -81,15 +76,12 @@ export const handler: APIGatewayProxyHandler = async (event) => {
     callStep('tokens_revoke', `${userBase}/tokens/revoke`, userId),
   ]);
 
-  // ── Phase 2: Scramble password (default on) ────────────────────────────────
-  let scrambleResult: StepResult | undefined;
-  if (!skipScramblePassword) {
-    scrambleResult = await callStep('user_scramble_password', `${userBase}/account/scramble-password`, userId);
-  }
+  // ── Phase 2: Scramble password (always) ───────────────────────────────────
+  const scrambleResult = await callStep('user_scramble_password', `${userBase}/account/scramble-password`, userId);
 
-  // ── Phase 3: Notification — scramble ran → scramble succeeded → check skipNotification
+  // ── Phase 3: Notification — scramble succeeded → check skipNotification ───
   let emailResult: StepResult | undefined;
-  if (!skipScramblePassword && scrambleResult?.ok && !skipNotification) {
+  if (scrambleResult.ok && !skipNotification) {
     emailResult = await callStep('notifications_password_email', `${userBase}/notifications/password-email`, userId);
   }
 
@@ -98,7 +90,7 @@ export const handler: APIGatewayProxyHandler = async (event) => {
     ...(blockResult ? [blockResult] : []),
     sessionsResult,
     tokensResult,
-    ...(scrambleResult ? [scrambleResult] : []),
+    scrambleResult,
     ...(emailResult ? [emailResult] : []),
   ];
 
@@ -108,11 +100,7 @@ export const handler: APIGatewayProxyHandler = async (event) => {
   // ── Summary log ───────────────────────────────────────────────────────────
   const skipped: string[] = [];
   if (skipBlockUser) skipped.push('user_block');
-  if (skipScramblePassword) {
-    skipped.push('user_scramble_password', 'notifications_password_email');
-  } else if (skipNotification) {
-    skipped.push('notifications_password_email');
-  }
+  if (skipNotification) skipped.push('notifications_password_email');
 
   const invokedLines = invokedResults.map(
     (r) => `  ${r.ok ? '✓' : '✗'} ${r.name}: ${r.result.status}${r.result.reason ? ` — ${r.result.reason}` : ''}`,
