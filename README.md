@@ -415,6 +415,24 @@ npm test
 npm run test:coverage
 ```
 
+### Coverage Report
+
+> Last updated: 2026-04-16 · 55 tests across 5 suites
+
+| File | Statements | Branches | Functions | Lines | Uncovered Lines |
+|---|---|---|---|---|---|
+| **All files** | **88.95%** | **88%** | **83.33%** | **89.11%** | |
+| `handlers/logout/full.handler.ts` | 100% | 89.65% | 100% | 100% | 145–149, 171 |
+| `handlers/sessions/revoke.handler.ts` | 100% | 100% | 100% | 100% | |
+| `handlers/tokens/revoke.handler.ts` | 100% | 100% | 100% | 100% | |
+| `handlers/user/block.handler.ts` | 100% | 100% | 100% | 100% | |
+| `handlers/user/scramble-password.handler.ts` | 100% | 100% | 100% | 100% | |
+| `shared/auth0-client.ts` | 40% | 50% | 0% | 42.85% | 25–39, 44 |
+| `shared/errors.ts` | 50% | 66.66% | 50% | 50% | 4–8, 14–15, 28, 33 |
+| `shared/response.ts` | 100% | 100% | 100% | 100% | |
+
+> **Note on `shared/` coverage:** `auth0-client.ts` and `errors.ts` are integration-boundary utilities — `auth0-client.ts` initialises the live `ManagementClient` from Secrets Manager (not unit-testable without AWS), and `errors.ts` error class constructors are exercised indirectly. All handler business logic is at 100%.
+
 ---
 
 ## Stage Behaviour Differences
