@@ -160,38 +160,39 @@ The `logout/full` handler runs a **conditional step pipeline** controlled by two
 
 | Flag | Type | Default | Effect |
 |---|---|---|---|
-| `skipScramblePassword` | boolean | `false` | Skips scramble-password, block fallback, and email |
+| `skipBlockUser` | boolean | `true` | Set `false` to invoke `user_block` as step 0, before sessions/tokens |
+| `skipScramblePassword` | boolean | `false` | Skips scramble-password and notification |
 | `skipNotification` | boolean | `false` | Skips notifications/password-email only |
 
 ```json
 POST /identity/users/{userId}/logout/full
-{ "skipScramblePassword": false, "skipNotification": false }
+{ "skipBlockUser": true, "skipScramblePassword": false, "skipNotification": false }
 ```
 
-Both flags default to `false` — the full pipeline runs unless explicitly opted out.
+`skipBlockUser` defaults to `true` — block is opt-in. `skipScramblePassword` and `skipNotification` default to `false` — scramble and email run unless explicitly opted out.
 
 ```mermaid
 flowchart TD
     START([POST /logout/full]) --> PARSE[Parse request body flags]
-    PARSE --> S1
+    PARSE --> SKIP_BLOCK{skipBlockUser? default true}
+
+    SKIP_BLOCK -->|false - opt-in| S0[user_block]
+    SKIP_BLOCK -->|true - skip block| S1
+
+    S0 --> S1
 
     subgraph Phase1["Phase 1 — Sequential always"]
         S1[sessions_revoke] --> S2[tokens_revoke]
     end
 
-    S2 --> SKIP_SCRAMBLE{skipScramblePassword?}
-    SKIP_SCRAMBLE -->|true - skip password phase| LOG
-    SKIP_SCRAMBLE -->|false - run scramble| S3[user_scramble_password]
+    S2 --> SKIP_SCRAMBLE{skipScramblePassword? default false}
+    SKIP_SCRAMBLE -->|true - skip| LOG
+    SKIP_SCRAMBLE -->|false - run| S3[user_scramble_password]
 
     S3 --> SCRAMBLE_OK{scramble succeeded?}
-    SCRAMBLE_OK -->|yes - skip block| EMAIL_GATE
-    SCRAMBLE_OK -->|no - fallback| S4[user_block]
+    SCRAMBLE_OK -->|no - skip email| LOG
+    SCRAMBLE_OK -->|yes| SKIP_NOTIFY{skipNotification? default false}
 
-    S4 --> BLOCK_OK{block succeeded?}
-    BLOCK_OK -->|yes| EMAIL_GATE
-    BLOCK_OK -->|no| LOG
-
-    EMAIL_GATE([account action ok?]) --> SKIP_NOTIFY{skipNotification?}
     SKIP_NOTIFY -->|true| LOG
     SKIP_NOTIFY -->|false| S5[notifications_password_email]
 
@@ -210,27 +211,37 @@ flowchart TD
 
 | Flags | Steps invoked | fetch calls | Response |
 |---|---|---|---|
-| none (defaults) — all succeed | sessions, tokens, scramble, email | 4 | `200` affectedCount: 4 |
-| none — scramble fails, block ok | sessions, tokens, scramble, block, email | 5 | `207` affectedCount: 4 |
-| none — scramble + block fail | sessions, tokens, scramble, block | 4 | `207` or `500` |
+| defaults — all succeed | sessions, tokens, scramble, email | 4 | `200` affectedCount: 4 |
+| defaults — scramble fails | sessions, tokens, scramble | 3 | `207` affectedCount: 2 |
+| `skipBlockUser=false` — all succeed | block, sessions, tokens, scramble, email | 5 | `200` affectedCount: 5 |
+| `skipBlockUser=false` — block fails, rest ok | block, sessions, tokens, scramble, email | 5 | `207` affectedCount: 4 |
 | `skipScramblePassword=true` | sessions, tokens | 2 | `200` affectedCount: 2 |
+| `skipBlockUser=false, skipScramblePassword=true` | block, sessions, tokens | 3 | `200` affectedCount: 3 |
 | `skipNotification=true` — scramble ok | sessions, tokens, scramble | 3 | `200` affectedCount: 3 |
-| `skipNotification=true` — scramble fails | sessions, tokens, scramble, block | 4 | `207` affectedCount: 3 |
+| `skipNotification=true` — scramble fails | sessions, tokens, scramble | 3 | `207` affectedCount: 2 |
 
 ### Console log summary (emitted on every invocation)
 
 ```
-[logout/full] userId=auth0|xyz | 4/4 steps succeeded
+[logout/full] userId=auth0|xyz | 4/4 steps succeeded [skipped: user_block]
+  ✓ sessions_revoke: success
+  ✓ tokens_revoke: success
+  ✓ user_scramble_password: success
+  ✓ notifications_password_email: success
+  - user_block: skipped
+
+[logout/full] userId=auth0|xyz | 5/5 steps succeeded
+  ✓ user_block: success
   ✓ sessions_revoke: success
   ✓ tokens_revoke: success
   ✓ user_scramble_password: success
   ✓ notifications_password_email: success
 
-[logout/full] userId=auth0|xyz | 2/2 steps succeeded [skipped: user_scramble_password, user_block, notifications_password_email]
+[logout/full] userId=auth0|xyz | 2/2 steps succeeded [skipped: user_block, user_scramble_password, notifications_password_email]
   ✓ sessions_revoke: success
   ✓ tokens_revoke: success
-  - user_scramble_password: skipped
   - user_block: skipped
+  - user_scramble_password: skipped
   - notifications_password_email: skipped
 ```
 

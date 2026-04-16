@@ -10,33 +10,37 @@ interface StepResult {
 }
 
 interface LogoutRequestBody {
-  /** Skip the scramble-password step (and its block fallback and notification).
+  /** Block the user BEFORE sessions/tokens revocation.
+   *  Default: true — block step is skipped. Set to false to block first. */
+  skipBlockUser?: boolean;
+  /** Skip the scramble-password step (and its notification).
    *  Default: false — scramble-password runs. */
   skipScramblePassword?: boolean;
   /** Skip the notifications/password-email step.
-   *  Default: false — notification is sent when account action succeeded.
-   *  Ignored (email always skipped) when skipScramblePassword is true. */
+   *  Default: false — notification is sent when scramble succeeded.
+   *  Ignored when skipScramblePassword is true. */
   skipNotification?: boolean;
 }
 
 /**
  * Orchestrates a full user logout using a conditional step pipeline.
  *
- * Runtime flags (optional request body — all default to false / on):
- *   skipScramblePassword — skips scramble-password, block fallback, and email
- *   skipNotification     — skips notifications/password-email only
+ * Runtime flags (optional request body):
+ *   skipBlockUser        — default true  — set false to block user FIRST (step 0)
+ *   skipScramblePassword — default false — skips scramble-password and notification
+ *   skipNotification     — default false — skips notifications/password-email only
  *
- * Phase 1 — Sequential (always runs in order):
- *   1. sessions/revoke
- *   2. tokens/revoke
- *   3. account/scramble-password  (skipped if skipScramblePassword=true)
+ * Step 0 — if skipBlockUser=false (opt-in):
+ *   account/block
  *
- * Phase 2 — Fallback (only if scramble-password was run and failed):
- *   4. account/block
+ * Phase 1 — Sequential (always runs):
+ *   sessions/revoke → tokens/revoke
  *
- * Phase 3 — Notification (only if scramble ran, account action succeeded,
- *            and skipNotification=false):
- *   5. notifications/password-email
+ * Phase 2 — if skipScramblePassword=false (default):
+ *   account/scramble-password
+ *
+ * Phase 3 — if skipScramblePassword=false AND skipNotification=false AND scramble succeeded:
+ *   notifications/password-email
  *
  * All invoked/skipped step statuses are summarised in a console.log at the end.
  *
@@ -59,40 +63,39 @@ export const handler: APIGatewayProxyHandler = async (event) => {
   }
 
   // ── Parse runtime flags ────────────────────────────────────────────────────
-  const { skipScramblePassword = false, skipNotification = false } = parseBody(event.body);
+  const { skipBlockUser = true, skipScramblePassword = false, skipNotification = false } = parseBody(event.body);
 
   const base = apiBaseUrl.replace(/\/$/, '');
   const userBase = `${base}/identity/users/${encodeURIComponent(userId)}`;
 
-  // ── Phase 1: Sequential ────────────────────────────────────────────────────
+  // ── Step 0: Block user (opt-in — only if skipBlockUser=false) ─────────────
+  let blockResult: StepResult | undefined;
+  if (!skipBlockUser) {
+    blockResult = await callStep('user_block', `${userBase}/account/block`, userId);
+  }
+
+  // ── Phase 1: Sequential (always) ──────────────────────────────────────────
   const sessionsResult = await callStep('sessions_revoke', `${userBase}/sessions/revoke`, userId);
   const tokensResult = await callStep('tokens_revoke', `${userBase}/tokens/revoke`, userId);
 
+  // ── Phase 2: Scramble password (default on) ────────────────────────────────
   let scrambleResult: StepResult | undefined;
   if (!skipScramblePassword) {
     scrambleResult = await callStep('user_scramble_password', `${userBase}/account/scramble-password`, userId);
   }
 
-  // ── Phase 2: Block fallback — only if scramble was run and failed ──────────
-  let blockResult: StepResult | undefined;
-  if (!skipScramblePassword && scrambleResult && !scrambleResult.ok) {
-    blockResult = await callStep('user_block', `${userBase}/account/block`, userId);
-  }
-
-  // ── Phase 3: Notification — skipped if password phase was skipped or
-  //             skipNotification=true or no account action succeeded ──────────
-  const accountActionOk = (scrambleResult?.ok ?? false) || (blockResult?.ok ?? false);
+  // ── Phase 3: Notification — only if scramble ran and succeeded ─────────────
   let emailResult: StepResult | undefined;
-  if (!skipScramblePassword && !skipNotification && accountActionOk) {
+  if (!skipScramblePassword && !skipNotification && scrambleResult?.ok) {
     emailResult = await callStep('notifications_password_email', `${userBase}/notifications/password-email`, userId);
   }
 
   // ── Collect all invoked steps ──────────────────────────────────────────────
   const invokedResults: StepResult[] = [
+    ...(blockResult ? [blockResult] : []),
     sessionsResult,
     tokensResult,
     ...(scrambleResult ? [scrambleResult] : []),
-    ...(blockResult ? [blockResult] : []),
     ...(emailResult ? [emailResult] : []),
   ];
 
@@ -101,8 +104,12 @@ export const handler: APIGatewayProxyHandler = async (event) => {
 
   // ── Summary log ───────────────────────────────────────────────────────────
   const skipped: string[] = [];
-  if (skipScramblePassword) skipped.push('user_scramble_password', 'user_block', 'notifications_password_email');
-  else if (skipNotification) skipped.push('notifications_password_email');
+  if (skipBlockUser) skipped.push('user_block');
+  if (skipScramblePassword) {
+    skipped.push('user_scramble_password', 'notifications_password_email');
+  } else if (skipNotification) {
+    skipped.push('notifications_password_email');
+  }
 
   const invokedLines = invokedResults.map(
     (r) => `  ${r.ok ? '✓' : '✗'} ${r.name}: ${r.result.status}${r.result.reason ? ` — ${r.result.reason}` : ''}`,
